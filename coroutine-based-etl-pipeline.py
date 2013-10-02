@@ -6,6 +6,10 @@
 # TODO understand why quotechar
 # TODO get rid of backshashes '\' in sizes
 # TODO parse rug sizes from rug name
+# TODO have filer name thrown an exception if a prod name is not in usual place
+# TODO write tests in 
+# TODO name: if comma in name, put item after comma first
+# TODO chnage filter fns so that they take an offest to find the attribute
 
 '''
 a coroutine based data processing pipeline; 
@@ -134,10 +138,37 @@ D = []
 
 #-------------- filters -----------------#
 
-hiprice = lambda q: float(q[-1]) >= 5000
+def scrub_text(any_str, pat_obj=re.compile(r'\W+')):
+	return pat_obj.sub(' ', any_str).lower()
+
+def get_price(line):
+	'''
+	returns integer price in USD
+	pass in a single data row (line)
+	'''
+	try:
+		return int(float(line[-1]))
+	except ValueError:
+		return "no price"
+
+def get_name(line):
+	'''
+	returns product name
+	pass in a single data row (line)
+	'''
+	return scrub_text(line[2])
+
+def get_skuID(line):
+	'''
+	returns sku id
+	pss in a single data row (line)
+	'''
+	return int(line[0])
+
+		
 isrug = lambda q: 'rug' in q[0].replace(',', '').lower().split()
 
-#------------------------- wrapper functions ------------------------#
+#------------------------- begn wrapper functions ------------------------#
 
 def timerfn(fn):
 	@wraps(fn)
@@ -165,9 +196,12 @@ def coroutine(fn):
 fname = "/Users/dougybarbo/Downloads/50k_sku_rows.csv"
 fh = open(fname, 'r', encoding='utf-8')
 
-fname_out = "/Users/dougybarbo/Documents/pipe.txt"
+p1 = "/Users/dougybarbo/Documents/pipe1.txt"
+p2 = "/Users/dougybarbo/Documents/pipe2.txt"
+p3 = "/Users/dougybarbo/Documents/pipe3.txt"
 
 
+#------------------------- end wrapper functions ------------------------#
 
 def opener(file_handle, target):
 	'''
@@ -175,32 +209,43 @@ def opener(file_handle, target):
 	'''
 	reader = CSV.reader(file_handle, delimiter='\t', lineterminator='\r\n', quotechar='|')
 	for line in reader:
-		newline = line[2:-3]
-		newline.append(line[-1])
-		target.send(newline)
-		
-
-
+		target.send(line)
+	
 #------------------------------------- begin two-way workers -----------------------------------#
 	
 @coroutine
-def grep1(filter, target):
+def remove_fields(target):
 	'''
-	a worker
+	a worker with both (yieid) and send
 	'''
 	try:
 		while 1:
 			line = (yield)
 			try:
-				if filter(line):
-					target.send(line)
+				pass
 			except ValueError:
-				err.append(line)
+				continue
+	except GeneratorExit:
+		target.close() 
+
+	
+@coroutine
+def grep1(filter, target):
+	'''
+	a worker with both (yieid) and send
+	'''
+	try:
+		while 1:
+			line = (yield)
+			try:
+				line = filter(line)
+				target.send(line)
+			except ValueError:
+				continue
 	except GeneratorExit:
 		target.close()
 
 #------------------------------------- end two-way workers -----------------------------------#
-
 
 @coroutine
 def broadcast(targets):
@@ -209,10 +254,8 @@ def broadcast(targets):
 		for target in targets:
 			target.send(line)
 
-
-
 @coroutine
-def persist():
+def persist(fname_out):
 	'''
 	sink: only yield (no send)
 	'''
@@ -225,21 +268,22 @@ def persist():
 
 @timerfn
 def main():
-	pass
+	opener(fh, 
+		broadcast(
+			[ 	grep1(get_price, persist(p1)),
+				grep1(get_name, persist(p2)),
+				grep1(get_skuID, persist(p3))
+			])
+	)
+	return 1
 
 
 if __name__=='__main__':
+	# main()
+	cProfile.run("main()")
+	# opener(fh, grep1(get_price, grep1(isrug, persist())))
 	
-	# cProfile.run("main()")
-	# opener(fh, grep1(hiprice, grep1(isrug, persist())))
 	
-	# alternative:
 	
-	opener(fh, 
-		broadcast(
-			[ 	grep1(hiprice, persist()),
-				grep1(isrug, persist())
-			])
-	)
 	
 	
