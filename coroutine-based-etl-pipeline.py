@@ -1,6 +1,23 @@
 #!/usr/local/bin/python
 # encoding: utf-8
 
+'''
+=====================================================================
+framework for coroutine-based data processing pipeline
+=====================================================================
+
+a coroutine based data processing pipeline; 
+this pipeline is comprised of three tiers:
+
+	(i) input (source) tier: only send (and yield as entry point)
+	(ii) middle tier (workers): *both* yield expression and send
+	(iii) output (sink) tier: only yield 
+	
+	a coroutine-based pipeline has one fn for the first tier and 
+	one for the third, and from one to many for the middle tier.
+
+'''
+
 
 # FIXME replace \n in individual fields w/ a space
 # TODO understand why quotechar
@@ -10,17 +27,8 @@
 # TODO write tests in 
 # TODO name: if comma in name, put item after comma first
 # TODO chnage filter fns so that they take an offest to find the attribute
+# TODO memoize filter fnx
 
-'''
-a coroutine based data processing pipeline; 
-this pipeline is comprised of three tiers:
-	(i) input (source) tier: only send (and yield as entry point)
-	(ii) middle tier (workers): both yield and send
-	(iii) output (sink) tier: only yield 
-	
-	a coroutine-based pipeline has one fn for the first tier and 
-	one for the third, and from one to many for the middle tier.
-'''
 
 import os, time, re
 import csv as CSV
@@ -28,8 +36,17 @@ import json as JSON
 import itertools
 import fnmatch
 from functools import wraps
+import functools
+import collections
 import time
 import cProfile
+
+print(__doc__)
+__author__ = 'doug ybarbo'
+__time__ = time.ctime()
+__version__ = ''
+
+
 
 err = [],
 data_file = [['Graceful Armchair', 'Furniture-Other-Other', 'Barbara Barry Tag Sale(BAB)', "This Week's Vintage Mix", 'walnut/linen/rayon', '', 'dark walnut/sky blue', '', '699.00'],
@@ -136,37 +153,13 @@ data_file = [['Graceful Armchair', 'Furniture-Other-Other', 'Barbara Barry Tag S
 
 D = []
 
-#-------------- filters -----------------#
+fname = "/Users/dougybarbo/Downloads/50k_sku_rows.csv"
+fh = open(fname, 'r', encoding='utf-8')
 
-def scrub_text(any_str, pat_obj=re.compile(r'\W+')):
-	return pat_obj.sub(' ', any_str).lower()
+p1 = "/Users/dougybarbo/Documents/pipe1.txt"
+p2 = "/Users/dougybarbo/Documents/pipe2.txt"
+p3 = "/Users/dougybarbo/Documents/pipe3.txt"
 
-def get_price(line):
-	'''
-	returns integer price in USD
-	pass in a single data row (line)
-	'''
-	try:
-		return int(float(line[-1]))
-	except ValueError:
-		return "no price"
-
-def get_name(line):
-	'''
-	returns product name
-	pass in a single data row (line)
-	'''
-	return scrub_text(line[2])
-
-def get_skuID(line):
-	'''
-	returns sku id
-	pss in a single data row (line)
-	'''
-	return int(line[0])
-
-		
-isrug = lambda q: 'rug' in q[0].replace(',', '').lower().split()
 
 #------------------------- begn wrapper functions ------------------------#
 
@@ -193,21 +186,62 @@ def coroutine(fn):
 	return start
 
 
-fname = "/Users/dougybarbo/Downloads/50k_sku_rows.csv"
-fh = open(fname, 'r', encoding='utf-8')
+def memoize(fn):
+	cache = {}
+	@wraps(fn)
+	def wrapper(*args):
+		if args not in cache:
+			cache[args] = fn(*args)
+		return cache[args]
+	return wrapper
 
-p1 = "/Users/dougybarbo/Documents/pipe1.txt"
-p2 = "/Users/dougybarbo/Documents/pipe2.txt"
-p3 = "/Users/dougybarbo/Documents/pipe3.txt"
 
 
 #------------------------- end wrapper functions ------------------------#
+
+
+#-------------- filters -----------------#
+
+def scrub_text(any_str:str, pat_obj=re.compile(r'\W+')) -> str:
+	return pat_obj.sub(' ', any_str).lower()
+
+
+def get_price(line:list) -> int:
+	'''
+	returns integer price in USD
+	pass in a single data row (line)
+	'''
+	try:
+		return int(float(line[-1]))
+	except ValueError:
+		return "no price"
+
+
+def get_name(line:list) -> str:
+	'''
+	returns product name
+	pass in a single data row (line)
+	'''
+	return scrub_text(line[2])
+
+
+def get_skuID(line:list) -> str:
+	'''
+	returns sku id
+	pass in a single data row (line)
+	'''
+	return int(line[0])
+
+		
+isrug = lambda q: 'rug' in q[0].replace(',', '').lower().split()
+
 
 def opener(file_handle, target):
 	'''
 	source: only .send (and yield as entry point)
 	'''
-	reader = CSV.reader(file_handle, delimiter='\t', lineterminator='\r\n', quotechar='|')
+	reader = CSV.reader(file_handle, delimiter='\t', 
+		lineterminator='\r\n', quotechar='|')
 	for line in reader:
 		target.send(line)
 	
